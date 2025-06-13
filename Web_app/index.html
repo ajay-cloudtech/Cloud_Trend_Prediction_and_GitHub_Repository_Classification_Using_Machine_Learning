@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Project Analysis</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        select, button, input { padding: 10px; margin: 5px; }
+        .tab { overflow: hidden; border-bottom: 1px solid #ccc; }
+        .tab button { background-color: #f1f1f1; float: left; border: none; outline: none; cursor: pointer; padding: 14px 16px; transition: 0.3s; }
+        .tab button:hover { background-color: #ddd; }
+        .tab button.active { background-color: #ccc; }
+        .tabcontent { display: none; padding: 20px 0; }
+        #Trends { display: block; }
+        table { border-collapse: collapse; width: 100%; max-width: 800px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        #chartContainer { margin-top: 20px; max-width: 800px; height: 400px; }
+        #forecastChart { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <h1>Cloud Project Analysis</h1>
+
+    <div class="tab">
+        <button class="tablinks" onclick="openTab(event, 'Trends')" id="defaultOpen">Trends</button>
+        <button class="tablinks" onclick="openTab(event, 'TrendsPerformance')">Trends Performance</button>
+        <button class="tablinks" onclick="openTab(event, 'Tags')">Tags</button>
+        <button class="tablinks" onclick="openTab(event, 'TagsPerformance')">Tags Performance</button>
+    </div>
+
+    <!-- Trends tab: Forecast visualization and data -->
+    <div id="Trends" class="tabcontent">
+        <h2>Trend Forecasting</h2>
+        <label for="category">Select Category:</label>
+        <select id="category">
+            <option value="Overall Cloud Projects">Overall Cloud Projects</option>
+            <option value="AWS Projects">AWS Projects</option>
+            <option value="Azure Projects">Azure Projects</option>
+            <option value="GCP Projects">GCP Projects</option>
+            <option value="Docker Projects">Docker Projects</option>
+            <option value="Kubernetes Projects">Kubernetes Projects</option>
+            <option value="Terraform Projects">Terraform Projects</option>
+            <option value="JavaScript Projects">JavaScript Projects</option>
+            <option value="Python Projects">Python Projects</option>
+            <option value="TypeScript Projects">TypeScript Projects</option>
+        </select>
+        <button onclick="getForecast()">Get Forecast</button>
+        <div id="chartContainer">
+            <canvas id="forecastChart"></canvas>
+        </div>
+        <div id="trendResults"></div>
+    </div>
+    <!-- Trends Performance tab: Prophet model metrics -->
+    <div id="TrendsPerformance" class="tabcontent">
+        <h2>Trend Forecasting Performance</h2>
+        <button onclick="getProphetPerformance()">Get Performance Metrics</button>
+        <div id="prophetPerformanceResults"></div>
+    </div>
+    <!-- Tags tab: Repository tag prediction -->
+    <div id="Tags" class="tabcontent">
+        <h2>Repository Tag Prediction</h2>
+        <label for="owner">GitHub Owner:</label>
+        <input type="text" id="owner" placeholder="e.g., e2eSolutionArchitect">
+        <label for="repo_name">Repository Name:</label>
+        <input type="text" id="repo_name" placeholder="e.g., terraform">
+        <button onclick="getTags()">Predict Tags</button>
+        <div id="tagResults"></div>
+    </div>
+    <!-- Tags Performance tab: XGBoost model metrics -->
+    <div id="TagsPerformance" class="tabcontent">
+        <h2>Tag Prediction Performance</h2>
+        <button onclick="getONNXPerformance()">Get Performance Metrics</button>
+        <div id="onnxPerformanceResults"></div>
+    </div>
+
+    <script>
+        let chart;
+
+        function openTab(evt, tabName) {
+            const tabcontent = document.getElementsByClassName("tabcontent");
+            for (let i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            const tablinks = document.getElementsByClassName("tablinks");
+            for (let i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+
+            if (tabName === 'Trends' && chart) {
+                setTimeout(() => chart.resize(), 100);
+            }
+        }
+
+        document.getElementById("defaultOpen").click();
+        // Fetch and display trend forecast data with chart
+        async function getForecast() {
+            const category = document.getElementById('category').value;
+            const response = await fetch('/forecast', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category: category })
+            });
+            const data = await response.json();
+
+            if (data.error) {
+                document.getElementById('trendResults').innerHTML = `<p style="color:red">${data.error}</p>`;
+                return;
+            }
+
+            let html = `<h3>Forecast</h3>`;
+            html += '<table><tr><th>Month</th><th>Predicted Value</th><th>Lower Bound</th><th>Upper Bound</th></tr>';
+            data.forecast.forEach(item => {
+                html += `<tr><td>${item.month}</td><td>${item.predicted_value}</td><td>${item.lower_bound}</td><td>${item.upper_bound}</td></tr>`;
+            });
+            html += '</table>';
+            html += '<h3>Historical Trends</h3>';
+            html += '<table><tr><th>Month</th><th>Actual Value</th></tr>';
+            data.historical.forEach(item => {
+                html += `<tr><td>${item.month}</td><td>${item.actual_value}</td></tr>`;
+            });
+            html += '</table>';
+            document.getElementById('trendResults').innerHTML = html;
+
+            const historicalLabels = data.historical.map(item => item.month);
+            const historicalValues = data.historical.map(item => item.actual_value);
+            const forecastLabels = data.forecast.map(item => item.month);
+            const predictedValues = data.forecast.map(item => item.predicted_value);
+            const lowerBounds = data.forecast.map(item => item.lower_bound);
+            const upperBounds = data.forecast.map(item => item.upper_bound);
+            const allLabels = [...historicalLabels, ...forecastLabels];
+
+            if (chart) chart.destroy();
+
+            const ctx = document.getElementById('forecastChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: allLabels,
+                    datasets: [
+                        { label: 'Historical Data', data: [...historicalValues, ...Array(forecastLabels.length).fill(null)], borderColor: 'blue', fill: false },
+                        { label: 'Predicted Value', data: [...Array(historicalLabels.length).fill(null), ...predictedValues], borderColor: 'red', fill: false },
+                        { label: 'Lower Bound', data: [...Array(historicalLabels.length).fill(null), ...lowerBounds], borderColor: 'pink', fill: '+1', backgroundColor: 'rgba(255, 192, 203, 0.3)' },
+                        { label: 'Upper Bound', data: [...Array(historicalLabels.length).fill(null), ...upperBounds], borderColor: 'pink', fill: false }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { x: { title: { display: true, text: 'Month' } }, y: { title: { display: true, text: 'Number of Projects' } } },
+                    plugins: { title: { display: true, text: `${data.category} Trend Forecast` } }
+                }
+            });
+        }
+        // Fetch and display Prophet performance metrics
+        async function getProphetPerformance() {
+            const response = await fetch('/prophet-performance', {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+
+            let html = `<h3>Prophet Performance Results</h3>`;
+            html += '<table><tr><th>Label</th><th>Latency (s)</th><th>Throughput (pred/s)</th><th>Dataset Size</th><th>MAE</th></tr>';
+            data.performance.forEach(item => {
+                html += `<tr><td>${item.label}</td><td>${item.latency}</td><td>${item.throughput}</td><td>${item.dataset_size}</td><td>${item.mae}</td></tr>`;
+            });
+            html += '</table>';
+            document.getElementById('prophetPerformanceResults').innerHTML = html;
+        }
+        // Fetch and display predicted tags for a repository
+        async function getTags() {
+            const owner = document.getElementById('owner').value;
+            const repo_name = document.getElementById('repo_name').value;
+            const response = await fetch('/predict-tags', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ owner: owner, repo_name: repo_name })
+            });
+            const data = await response.json();
+
+            if (data.error) {
+                document.getElementById('tagResults').innerHTML = `<p style="color:red">${data.error}</p>`;
+                return;
+            }
+
+            let html = `<h3>Predicted Tags for ${data.repo}</h3>`;
+            if (data.tags.length > 0) {
+                html += '<ul>';
+                data.tags.forEach(tag => {
+                    html += `<li>${tag}</li>`;
+                });
+                html += '</ul>';
+            } else {
+                html += '<p>No tags predicted for this repository.</p>';
+            }
+            document.getElementById('tagResults').innerHTML = html;
+        }
+        // Fetch and display XGBoost performance metrics
+        async function getONNXPerformance() {
+            const response = await fetch('/xgboost-performance', {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+
+            let html = `<h3>XGBoost Performance Results</h3>`;
+            html += '<table><tr><th>Label</th><th>Latency (s)</th><th>Throughput (pred/s)</th><th>Dataset Size</th><th>Hamming Score</th></tr>';
+            data.performance.forEach(item => {
+                html += `<tr><td>${item.label}</td><td>${item.latency}</td><td>${item.throughput}</td><td>${item.dataset_size}</td><td>${item.hamming_score}</td></tr>`;
+            });
+            html += '</table>';
+            document.getElementById('onnxPerformanceResults').innerHTML = html;
+        }
+    </script>
+</body>
+</html>
